@@ -26,6 +26,7 @@ using Cosmoteer.Simulation.HitEffects;
 using Cosmoteer.Ships.Buffs;
 using Cosmoteer.Game.Gui;
 using Cosmoteer.Bullets.Death;
+using System;
 
 [assembly: IgnoresAccessChecksTo("Cosmoteer")]
 [assembly: IgnoresAccessChecksTo("HalflingCore")]
@@ -242,6 +243,23 @@ namespace ProjectileSpawner
 
             return cb;
         }
+
+        public static Vector2 Rotate(Vector2 vector, Vector2 pivot, float angle)
+        {
+            // Translate the vector so that the pivot point is at the origin
+            Vector2 translatedVector = vector - pivot;
+
+            // Apply the rotation to the translated vector
+            float angleInRadians = angle;
+            float cos = MathF.Cos(angleInRadians);
+            float sin = MathF.Sin(angleInRadians);
+            float x = translatedVector.X * cos - translatedVector.Y * sin;
+            float y = translatedVector.X * sin + translatedVector.Y * cos;
+
+            // Translate the rotated vector back to its original position
+            Vector2 rotatedVector = new Vector2(x, y) + pivot;
+            return rotatedVector;
+        }
     }
 
     public class Main
@@ -383,7 +401,8 @@ namespace ProjectileSpawner
                     {
                         Vector2 loc = Main.simRoot.WorldMouseLoc;
                         Direction rot = Main.simRoot.Camera.Rotation;
-                        float degrees = rot.ToDegrees();
+
+                        Vector2[] points = new Vector2[bulletAmount];
 
                         float spread = 1f;
                         float startX = loc.X - spread / 2 - (((bulletAmount / 2) - 1) * spread);
@@ -393,11 +412,14 @@ namespace ProjectileSpawner
                             float x = startX + i * spread;
                             float y = loc.Y;
 
-                            //rotate coordinate system by degrees
-                            float xCoord = x * MathF.Cos(degrees) + y * MathF.Sin(degrees);
-                            float yCoord = y * MathF.Cos(degrees) * x * MathF.Sin(degrees);
+                            Vector2 pos = new Vector2(x, y);
 
-                            Vector2 pos = new Vector2(xCoord, yCoord);
+                            points[i] = pos;
+                        }
+
+                        for(int i = 0; i < bulletAmount; i++)
+                        {
+                            Vector2 pos = Utils.Rotate(points[i], loc, rot.ToRadians());
 
                             SpawnBullet(pos);
                         }
@@ -834,7 +856,7 @@ namespace ProjectileSpawner
             angleInfoLabel.TextRenderer.FontSize = 14;
             weaponsBox.AddChild(angleInfoLabel);
 
-            /*TextEditField bulletAmountEdit = Utils.CreateEditLabel(weaponsBox, "Amount of Bullets", bulletAmount.ToString(), CharFilters.UnsignedDecimal);
+            TextEditField bulletAmountEdit = Utils.CreateEditLabel(weaponsBox, "Amount of Bullets", bulletAmount.ToString(), CharFilters.UnsignedDecimal);
             bulletAmountEdit.TextChanged += delegate
             {
                 bool ok = Int32.TryParse(bulletAmountEdit.Text, out int newValue);
@@ -842,7 +864,7 @@ namespace ProjectileSpawner
                 {
                     bulletAmount = newValue;
                 }
-            };*/
+            };
 
             LayoutBox advancedOptionsBox = Utils.CreateCategoryBox(weaponsBox, "Advanced Options", false)[0];
 
