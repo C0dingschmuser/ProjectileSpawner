@@ -827,6 +827,13 @@ namespace ProjectileSpawner
                 projectilesEnabled = enableProjectileButton.IsSelected;
             };
 
+            Label angleInfoLabel = new Label();
+            angleInfoLabel.AutoSize.AutoWidthMode = AutoSizeMode.Enable;
+            angleInfoLabel.AutoSize.AutoHeightMode = AutoSizeMode.Enable;
+            angleInfoLabel.Text = "Change angle of Projectile by turning camera with Q & E Key";
+            angleInfoLabel.TextRenderer.FontSize = 14;
+            weaponsBox.AddChild(angleInfoLabel);
+
             /*TextEditField bulletAmountEdit = Utils.CreateEditLabel(weaponsBox, "Amount of Bullets", bulletAmount.ToString(), CharFilters.UnsignedDecimal);
             bulletAmountEdit.TextChanged += delegate
             {
