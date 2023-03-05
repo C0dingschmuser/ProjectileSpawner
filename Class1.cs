@@ -27,6 +27,8 @@ using Cosmoteer.Ships.Buffs;
 using Cosmoteer.Game.Gui;
 using Cosmoteer.Bullets.Death;
 using System;
+using System.Diagnostics;
+using System.Security.Policy;
 
 [assembly: IgnoresAccessChecksTo("Cosmoteer")]
 [assembly: IgnoresAccessChecksTo("HalflingCore")]
@@ -53,11 +55,11 @@ namespace ProjectileSpawner
         Erase
     }
 
-    public enum FireProperty
+    public enum SpawnShape
     {
-        Damage,
-        Spread,
-        Kill
+        Line,
+        Square,
+        Circle
     }
 
     public static class Utils
@@ -260,6 +262,47 @@ namespace ProjectileSpawner
             Vector2 rotatedVector = new Vector2(x, y) + pivot;
             return rotatedVector;
         }
+
+        public static List<Vector2> GenerateCirclePoints(float r, int n)
+        {
+            List<Vector2> points = new List<Vector2>();
+            float angle = 360.0f / n;
+
+            const float deg2rad = (MathF.PI * 2) / 360.0f;
+
+            for (int i = 0; i < n; i++)
+            {
+                float x = r * MathF.Cos(angle * i * deg2rad);
+                float y = r * MathF.Sin(angle * i * deg2rad);
+                points.Add(new Vector2(x, y));
+            }
+
+            return points;
+        }
+
+        public static List<Vector2> CenterPointsAround(List<Vector2> points, Vector2 center)
+        {
+            // Find the average of all the points
+            Vector2 sum = Vector2.Zero;
+            for (int i = 0; i < points.Count; i++)
+            {
+                sum += points[i];
+            }
+            Vector2 average = sum / points.Count;
+
+            // Calculate the offset required to center all the points around the specified center
+            Vector2 offset = center - average;
+
+            // Apply the offset to all the points
+            for (int i = 0; i < points.Count; i++)
+            {
+                points[i] += offset;
+            }
+
+            // Return the centered points
+            return points;
+        }
+
     }
 
     public class Main
@@ -268,6 +311,13 @@ namespace ProjectileSpawner
         {
             FireMode.Place,
             FireMode.Erase
+        };
+
+        private static readonly List<SpawnShape> SELECTABLE_SPAWN_SHAPES = new List<SpawnShape>
+        {
+            SpawnShape.Line,
+            SpawnShape.Square,
+            SpawnShape.Circle,
         };
 
         private static List<WeaponsHolder> SELECTABLE_WEAPONS = new List<WeaponsHolder>();
@@ -284,6 +334,7 @@ namespace ProjectileSpawner
         private static Label? shipLabel;
 
         private static WeaponsHolder? selectedWeapon;
+        private static SpawnShape selectedSpawnShape = SpawnShape.Line;
 
         private static FireMode fireMode = FireMode.Place;
         private static FireRules? fireRules;
@@ -305,8 +356,6 @@ namespace ProjectileSpawner
         public static void InitializePatches()
         {
             keyboard = Halfling.App.Keyboard; 
-
-            //bool mouseLeftPressed = Halfling.App.Mouse.LeftButton.WasPressed;
 
             Halfling.App.Director.FrameEnded += Worker;
         }
@@ -341,7 +390,7 @@ namespace ProjectileSpawner
                 {
                     if (result && Main.gameRoot.p_showMap)
                     {
-                        MsgBox(currentState.GetType().ToString(), "Test");
+                        //MsgBox(currentState.GetType().ToString(), "Test");
                     }
                 }
 
@@ -402,27 +451,66 @@ namespace ProjectileSpawner
                         Vector2 loc = Main.simRoot.WorldMouseLoc;
                         Direction rot = Main.simRoot.Camera.Rotation;
 
-                        Vector2[] points = new Vector2[bulletAmount];
-
-                        float spread = 1f;
-                        float startX = loc.X - spread / 2 - (((bulletAmount / 2) - 1) * spread);
-
-                        for(int i = 0; i < bulletAmount; i++)
+                        if (selectedSpawnShape == SpawnShape.Line)
                         {
-                            float x = startX + i * spread;
-                            float y = loc.Y;
+                            Vector2[] points = new Vector2[bulletAmount];
 
-                            Vector2 pos = new Vector2(x, y);
+                            float spread = 1f;
+                            float startX = loc.X - spread / 2 - (((bulletAmount / 2) - 1) * spread);
 
-                            points[i] = pos;
+                            for (int i = 0; i < bulletAmount; i++)
+                            {
+                                float x = startX + i * spread;
+                                float y = loc.Y;
+
+                                Vector2 pos = new Vector2(x, y);
+
+                                points[i] = pos;
+                            }
+
+                            for (int i = 0; i < bulletAmount; i++)
+                            {
+                                Vector2 pos = Utils.Rotate(points[i], loc, rot.ToRadians());
+
+                                SpawnBullet(pos);
+                            }
+                        } else if(selectedSpawnShape == SpawnShape.Square)
+                        {
+                            List<Vector2> points = new List<Vector2>();
+
+                            int count = Convert.ToInt32(MathF.Sqrt(bulletAmount));
+
+                            for (int y = 0; y < count; y++)
+                            {
+                                for(int x = 0; x < count; x++)
+                                {
+                                    Vector2 pos = new Vector2(x, y);
+
+                                    points.Add(pos);
+                                }
+                            }
+
+                            points = Utils.CenterPointsAround(points, loc);
+
+                            for (int i = 0; i < points.Count; i++)
+                            {
+                                Vector2 pos = Utils.Rotate(points[i], loc, rot.ToRadians());
+
+                                SpawnBullet(pos);
+                            }
+                        } else if(selectedSpawnShape == SpawnShape.Circle)
+                        {
+                            List<Vector2> points = Utils.GenerateCirclePoints(bulletAmount, bulletAmount);
+                            points = Utils.CenterPointsAround(points, loc);
+
+                            for (int i = 0; i < points.Count; i++)
+                            {
+                                Vector2 pos = Utils.Rotate(points[i], loc, rot.ToRadians());
+
+                                SpawnBullet(pos);
+                            }
                         }
 
-                        for(int i = 0; i < bulletAmount; i++)
-                        {
-                            Vector2 pos = Utils.Rotate(points[i], loc, rot.ToRadians());
-
-                            SpawnBullet(pos);
-                        }
                     }
                 }
 
@@ -489,44 +577,6 @@ namespace ProjectileSpawner
                 {
                     Main.weaponsToolBox.SelfActive = !Main.weaponsToolBox.SelfActive;
                 }
-            }
-        }
-
-        public void SetFireProperty(FireProperty fireProperty, float value)
-        {
-            FireRules rules = fireRules;
-
-            switch (fireProperty)
-            {
-                default:
-                case FireProperty.Damage:
-                    rules.DamagePerUpdate = (int)Math.Round(value);
-                    break;
-                case FireProperty.Spread:
-                    rules.SpreadChancePerUpdate = value;
-                    break;
-                case FireProperty.Kill:
-                    rules.KillChancePerUpdate = value;
-                    break;
-            }
-        }
-
-        public float GetFireProperty(FireProperty fireProperty)
-        {
-            FireRules rules = fireRules;
-
-            switch(fireProperty)
-            {
-                default:
-                case FireProperty.Damage:
-                    return rules.DamagePerUpdate;
-                    break;
-                case FireProperty.Spread:
-                    return rules.SpreadChancePerUpdate;
-                    break;
-                case FireProperty.Kill:
-                    return rules.KillChancePerUpdate;
-                    break;
             }
         }
 
@@ -828,8 +878,8 @@ namespace ProjectileSpawner
         {
             WeaponsToolbox weaponsToolBox = new WeaponsToolbox(Main.gameRoot);
             weaponsToolBox.SelfActive = false;
-            weaponsToolBox.Rect = new Rect(10f, 70f, 450f, 500f);
-            weaponsToolBox.ResizeController.MinSize = new Vector2(450f, 500f);
+            weaponsToolBox.Rect = new Rect(10f, 70f, 450f, 540f);
+            weaponsToolBox.ResizeController.MinSize = new Vector2(450f, 540f);
             weaponsToolBox.ResizeController.MaxSize = new Vector2(700f, 1024f);
 
             LayoutBox weaponsBox = Utils.CreateCategoryBox(weaponsToolBox, "Weapons", true)[0];
@@ -864,6 +914,38 @@ namespace ProjectileSpawner
                 {
                     bulletAmount = newValue;
                 }
+            };
+
+            Label shapeInfoLabel = new Label();
+            shapeInfoLabel.AutoSize.AutoWidthMode = AutoSizeMode.Enable;
+            shapeInfoLabel.AutoSize.AutoHeightMode = AutoSizeMode.Enable;
+            shapeInfoLabel.Text = "Spawn formation (if amount > 1)";
+            shapeInfoLabel.TextRenderer.FontSize = 14;
+            weaponsBox.AddChild(shapeInfoLabel);
+
+            DropList shapeList = new DropList();
+            shapeList.Text = SELECTABLE_SPAWN_SHAPES[0].ToString();
+            shapeList.StateNormalTextRenderer.FontSize = 14;
+            shapeList.StateDisabledTextRenderer.FontSize = 14;
+            shapeList.StateHighlightedTextRenderer.FontSize = 14;
+            shapeList.StatePressedTextRenderer.FontSize = 14;
+            weaponsBox.AddChild(shapeList);
+
+            DataBinder<SelectableButton, SpawnShape> shapeBinding = shapeList.ListBox.Children.BindToData(SELECTABLE_SPAWN_SHAPES, delegate (SpawnShape shape)
+            {
+                ListItem listItem = new ListItem();
+                listItem.Text = shape.ToString();
+                return listItem;
+            });
+            shapeList.Clicked += delegate
+            {
+                projectilesEnabled = false;
+            };
+            shapeList.ListBox.SelectionManager.WidgetSelected += delegate
+            {
+                selectedSpawnShape = shapeBinding.GetDataForWidget(shapeList.SelectedWidget);
+                projectilesEnabled = false;
+                enableProjectileButton.IsSelected = false;
             };
 
             LayoutBox advancedOptionsBox = Utils.CreateCategoryBox(weaponsBox, "Advanced Options", false)[0];
@@ -1021,6 +1103,23 @@ namespace ProjectileSpawner
             };
 
             #endregion
+
+            Label dcLabel = new Label();
+            dcLabel.AutoSize.AutoWidthMode = AutoSizeMode.Enable;
+            dcLabel.AutoSize.AutoHeightMode = AutoSizeMode.Enable;
+            dcLabel.Text = "Have an Idea or found a bug?";
+            dcLabel.TextRenderer.FontSize = 14;
+            weaponsToolBox.AddChild(dcLabel);
+
+            Halfling.Gui.Button dcBtn = new Halfling.Gui.Button();
+            dcBtn.AutoSize.AutoWidthMode = AutoSizeMode.Enable;
+            dcBtn.AutoSize.AutoHeightMode = AutoSizeMode.Enable;
+            dcBtn.Text = "Join my Discord";
+            dcBtn.Clicked += delegate
+            {
+                Process.Start(new ProcessStartInfo("https://discord.gg/dAvpvRGS8d") { UseShellExecute = true });
+            };
+            weaponsToolBox.AddChild(dcBtn);
 
             gameRoot.Gui.FloatingWindows.AddChild(weaponsToolBox);
 
