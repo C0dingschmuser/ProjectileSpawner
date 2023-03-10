@@ -29,6 +29,8 @@ using Cosmoteer.Bullets.Death;
 using System;
 using System.Diagnostics;
 using System.Security.Policy;
+using Cosmoteer.Ships.Parts;
+using Cosmoteer.Ships.Parts.Weapons;
 
 [assembly: IgnoresAccessChecksTo("Cosmoteer")]
 [assembly: IgnoresAccessChecksTo("HalflingCore")]
@@ -67,6 +69,56 @@ namespace ProjectileSpawner
         public static string GetPercent(float input)
         {
             return String.Format("{0:P2}", input);
+        }
+
+        public static float GetAngle(Vector2 start, Vector2 end)
+        {
+            return MathF.Atan2(end.Y - start.Y, end.X - start.X);
+        }
+
+        public static List<Vector2> GetPoints(SpawnShape shape, Vector2 center, int amount, float arg2 = 0)
+        {
+            List<Vector2> points = new List<Vector2>();
+
+            switch(shape)
+            {
+                case SpawnShape.Line:
+                    float spread = 1f;
+                    float startX = 0 - spread / 2 - (((amount / 2) - 1) * spread);
+
+                    for (int i = 0; i < amount; i++)
+                    {
+                        float x = 0; 
+                        float y = startX + i * spread;
+
+                        Vector2 pos = new Vector2(x, y);
+
+                        points.Add(pos);
+                    }
+                    points = Utils.CenterPointsAround(points, center);
+                    break;
+                case SpawnShape.Square:
+                    int count = Convert.ToInt32(MathF.Sqrt(amount));
+
+                    for (int y = 0; y < count; y++)
+                    {
+                        for (int x = 0; x < count; x++)
+                        {
+                            Vector2 pos = new Vector2(x, y);
+
+                            points.Add(pos);
+                        }
+                    }
+
+                    points = Utils.CenterPointsAround(points, center);
+                    break;
+                case SpawnShape.Circle:
+                    points = Utils.GenerateCirclePoints(arg2, amount);
+                    points = Utils.CenterPointsAround(points, center);
+                    break;
+            }
+
+            return points;
         }
 
         private static Widget CreateToggledCategory(string name, bool expanded, out LayoutBox box, out ToggleButton btn)
@@ -332,6 +384,7 @@ namespace ProjectileSpawner
         public static WeaponsToolbox? weaponsToolBox;
 
         private static Label? shipLabel;
+        private static TextEditField? rangeTextField;
 
         private static WeaponsHolder? selectedWeapon;
         private static SpawnShape selectedSpawnShape = SpawnShape.Line;
@@ -341,13 +394,16 @@ namespace ProjectileSpawner
 
         private static Ship? currentShip;
         private static Ship? emptyShip;
+        private static List<CustomBeamEmitter> customBeamEmitters = new List<CustomBeamEmitter>();
 
         private static bool loaded = false;
         private static bool inBuilder = false;
+        private static bool firingBeam = false;
         private static bool projectilesEnabled = true;
         private static bool firesEnabled = false;
 
         public static int bulletAmount = 1;
+        public static int circleRadius = 64;
         public static int fireRadius = 1;
 
         private static List<WeaponCategoryHolder> weaponCategories = new List<WeaponCategoryHolder>();
@@ -358,6 +414,7 @@ namespace ProjectileSpawner
             keyboard = Halfling.App.Keyboard; 
 
             Halfling.App.Director.FrameEnded += Worker;
+            
         }
 
         public static void MsgBox(string text, string caption)
@@ -441,78 +498,216 @@ namespace ProjectileSpawner
 
                 bool result = Halfling.App.Mouse.LeftButton.WasPressed; //keyboard.HotkeyPressed(ViKey.L, true);
 
-                if (result && projectilesEnabled && !Main.weaponsToolBox.IsMouseOver)
+                Vector2 mloc = Main.simRoot.WorldMouseLoc;
+                Direction mrot = Main.simRoot.Camera.Rotation;
+                float degrees = mrot.ToDegrees();
+                degrees -= 90;
+                mrot = Direction.FromDegrees(degrees);
+
+                if(projectilesEnabled && projectilesEnabled && !Main.weaponsToolBox.IsMouseOver)
                 {
-                    if(bulletAmount == 1)
+                    if(selectedWeapon.bRules != null)
                     {
-                        SpawnBullet(Main.simRoot.WorldMouseLoc);
-                    } else
-                    {
-                        Vector2 loc = Main.simRoot.WorldMouseLoc;
-                        Direction rot = Main.simRoot.Camera.Rotation;
-
-                        if (selectedSpawnShape == SpawnShape.Line)
+                        if (App.Mouse.LeftButton.IsDown)
                         {
-                            Vector2[] points = new Vector2[bulletAmount];
-
-                            float spread = 1f;
-                            float startX = loc.X - spread / 2 - (((bulletAmount / 2) - 1) * spread);
-
-                            for (int i = 0; i < bulletAmount; i++)
+                            if (!firingBeam)
                             {
-                                float x = startX + i * spread;
-                                float y = loc.Y;
+                                firingBeam = true;
 
-                                Vector2 pos = new Vector2(x, y);
+                                customBeamEmitters.Clear();
 
-                                points[i] = pos;
-                            }
-
-                            for (int i = 0; i < bulletAmount; i++)
-                            {
-                                Vector2 pos = Utils.Rotate(points[i], loc, rot.ToRadians());
-
-                                SpawnBullet(pos);
-                            }
-                        } else if(selectedSpawnShape == SpawnShape.Square)
-                        {
-                            List<Vector2> points = new List<Vector2>();
-
-                            int count = Convert.ToInt32(MathF.Sqrt(bulletAmount));
-
-                            for (int y = 0; y < count; y++)
-                            {
-                                for(int x = 0; x < count; x++)
+                                if(bulletAmount == 1)
                                 {
-                                    Vector2 pos = new Vector2(x, y);
+                                    CustomBeamEmitter testIon = new CustomBeamEmitter(selectedWeapon.bRules);
 
-                                    points.Add(pos);
+                                    testIon._dummyShip = emptyShip;
+                                    testIon.StartEmission(mloc, mrot, true);
+                                    customBeamEmitters.Add(testIon);
+                                } 
+                                else
+                                {
+                                    if(selectedSpawnShape == SpawnShape.Line || selectedSpawnShape == SpawnShape.Square)
+                                    {
+                                        List<Vector2> points = Utils.GetPoints(selectedSpawnShape, mloc, bulletAmount);
+
+                                        for (int i = 0; i < points.Count; i++)
+                                        {
+                                            Vector2 pos = Utils.Rotate(points[i], mloc, mrot.ToRadians());
+                                            Vector2 offset = mloc - pos;
+
+                                            CustomBeamEmitter testIon = new CustomBeamEmitter(selectedWeapon.bRules);
+
+                                            testIon._dummyShip = emptyShip;
+                                            testIon._offset = offset;
+                                            testIon.StartEmission(pos, mrot, true);
+                                            customBeamEmitters.Add(testIon);
+                                        }
+                                    }
+                                    else if (selectedSpawnShape == SpawnShape.Circle)
+                                    {
+                                        List<Vector2> points = Utils.GetPoints(selectedSpawnShape, mloc, bulletAmount, circleRadius);
+
+                                        if(rangeTextField != null)
+                                        {
+                                            rangeTextField.Text = circleRadius.ToString();
+                                        }
+
+                                        for (int i = 0; i < points.Count; i++)
+                                        {
+                                            Vector2 pos = Utils.Rotate(points[i], mloc, mrot.ToRadians());
+                                            Vector2 offset = mloc - pos;
+                                            Direction r = new Direction(Utils.GetAngle(mloc, pos));
+
+                                            BuffableFloat range = selectedWeapon.bRules.Range;
+                                            range.BaseValue = circleRadius;
+                                            selectedWeapon.bRules.Range = range;
+
+                                            CustomBeamEmitter testIon = new CustomBeamEmitter(selectedWeapon.bRules);
+
+                                            testIon._dummyShip = emptyShip;
+                                            testIon._offset = offset;
+                                            testIon.StartEmission(pos, r, true);
+                                            customBeamEmitters.Add(testIon);
+                                        }
+                                    }
                                 }
                             }
-
-                            points = Utils.CenterPointsAround(points, loc);
-
-                            for (int i = 0; i < points.Count; i++)
+                            else
                             {
-                                Vector2 pos = Utils.Rotate(points[i], loc, rot.ToRadians());
-
-                                SpawnBullet(pos);
+                                for (int i = 0; i < customBeamEmitters.Count; i++)
+                                {
+                                    if(bulletAmount == 1)
+                                    {
+                                        customBeamEmitters[i]._worldLocation = mloc;
+                                        customBeamEmitters[i]._worldDirection = mrot;
+                                    } else
+                                    {
+                                        if(selectedSpawnShape == SpawnShape.Circle)
+                                        {
+                                            customBeamEmitters[i]._worldLocation = mloc + customBeamEmitters[i]._offset;
+                                            //rotation update not needed
+                                        } else
+                                        {
+                                            customBeamEmitters[i]._worldLocation = mloc + customBeamEmitters[i]._offset;
+                                            customBeamEmitters[i]._worldDirection = mrot;
+                                        }
+                                    }
+                                    customBeamEmitters[i].DoEmitBeam();
+                                }
                             }
-                        } else if(selectedSpawnShape == SpawnShape.Circle)
+                        }
+                        else
                         {
-                            List<Vector2> points = Utils.GenerateCirclePoints(bulletAmount, bulletAmount);
-                            points = Utils.CenterPointsAround(points, loc);
-
-                            for (int i = 0; i < points.Count; i++)
+                            if (selectedWeapon.bRules != null)
                             {
-                                Vector2 pos = Utils.Rotate(points[i], loc, rot.ToRadians());
+                                //reset beam emitter
 
-                                SpawnBullet(pos);
+                                if (firingBeam)
+                                {
+                                    firingBeam = false;
+
+                                    for (int i = 0; i < customBeamEmitters.Count; i++)
+                                    {
+                                        customBeamEmitters[i].StopEmission();
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if(result)
+                    {
+                        if(selectedWeapon.bRules == null)
+                        {
+                            //only enter when no beam emitter
+
+                            Direction rot = Main.simRoot.Camera.Rotation;
+                            float ndegrees = rot.ToDegrees();
+                            ndegrees -= 90;
+                            rot = Direction.FromDegrees(ndegrees);
+
+                            if (bulletAmount == 1)
+                            {
+                                SpawnBullet(Main.simRoot.WorldMouseLoc, rot);
+                            }
+                            else
+                            {
+                                List<Vector2> points = Utils.GetPoints(selectedSpawnShape, mloc, bulletAmount, circleRadius);
+
+                                if(selectedSpawnShape == SpawnShape.Circle)
+                                {
+                                    if (rangeTextField != null)
+                                    {
+                                        rangeTextField.Text = circleRadius.ToString();
+                                    }
+                                }
+
+                                for (int i = 0; i < points.Count; i++)
+                                {
+                                    Vector2 pos = Utils.Rotate(points[i], mloc, mrot.ToRadians());
+
+                                    if(selectedSpawnShape == SpawnShape.Circle)
+                                    {
+                                        rot = new Direction(Utils.GetAngle(pos, mloc));
+                                        SpawnBullet(pos, rot, circleRadius);
+                                    }
+                                    else
+                                    {
+                                        SpawnBullet(pos, rot);
+                                    }
+
+                                }
+
+                                //Vector2 loc = Main.simRoot.WorldMouseLoc;
+                                //Direction rot = Main.simRoot.Camera.Rotation;
+                            }
+                        }
+                    }
+                }
+
+                //if (result && projectilesEnabled && !Main.weaponsToolBox.IsMouseOver && )
+                //{
+                    //Only enter when non-beam-emitter
+
+                    /*if(customBeamEmitter == null)
+                    {
+                        beamEmitterRules.Width = 10;
+                        HitRules hO = beamEmitterRules.HitOperational;
+                        
+                        MultiHitEffectRules multi = hO.HitEffects;
+                        foreach(HitEffectRules hOr in multi.Effects)
+                        {
+                            if(hOr.GetType() == typeof(DamageEffectRules))
+                            {
+                                DamageEffectRules dmg = (DamageEffectRules)hOr;
+                                BuffableInt val = dmg.Damage;
+                                val.BaseValue = 9900000;
+                                dmg.Damage = val;
                             }
                         }
 
-                    }
-                }
+                        hO = beamEmitterRules.HitStructural;
+                        multi = hO.HitEffects;
+                        foreach (HitEffectRules hOr in multi.Effects)
+                        {
+                            if (hOr.GetType() == typeof(DamageEffectRules))
+                            {
+                                DamageEffectRules dmg = (DamageEffectRules)hOr;
+                                BuffableInt val = dmg.Damage;
+                                val.BaseValue = 9900000;
+                                dmg.Damage = val;
+                            }
+                        }
+
+                        CustomBeamEmitter testIon = new CustomBeamEmitter(beamEmitterRules);
+                        testIon._currentRange = 9999;
+
+                        testIon._dummyShip = emptyShip;
+                        testIon.StartEmission(mloc, mrot, true);
+                        customBeamEmitter = testIon;
+                        //MsgBox("emitstart", "");
+                    }*/
+                //}
 
                 result = keyboard.HotkeyPressed(ViKey.K, true);
 
@@ -580,18 +775,20 @@ namespace ProjectileSpawner
             }
         }
 
-        private static void SpawnBullet(Vector2 spawnLoc)
+        private static void SpawnBullet(Vector2 spawnLoc, Direction rot, float newRange = -1)
         {
             BulletRules rules = selectedWeapon.rules;
+
+            if(newRange > 0)
+            {
+                BuffableFloat range = rules.Range;
+                range.BaseValue = newRange;
+                rules.Range = range;
+            }
 
             Angle minSpread = 0; //rules.Spread.Min.GetValue(base.Part);
             Angle maxSpread = 0; //Rules.Spread.Max.GetValue(base.Part);
             Angle dirOffset = 0; //(Rules.EvenSpread ? ((Angle)((float)minSpread + burstProgress * ((float)maxSpread - (float)minSpread))) : base.Rand.Angle(minSpread, maxSpread));
-
-            Direction rot = Main.simRoot.Camera.Rotation;
-            float degrees = rot.ToDegrees();
-            degrees -= 90;
-            rot = Direction.FromDegrees(degrees);
 
             Direction worldSpawnDir = rot;
             ITarget? target = null;
@@ -626,6 +823,37 @@ namespace ProjectileSpawner
         {
             SELECTABLE_WEAPONS.Clear();
 
+            List<PartComponentRules> bemList = new List<PartComponentRules>();
+
+            foreach( KeyValuePair<Cosmoteer.Data.ID<ShipRules>, ShipRules> tmp in GameApp.Rules._shipRulesById)
+            {
+                PartRules[] parts = tmp.Value.Parts;
+                foreach( PartRules part in parts )
+                {
+                    foreach (PartComponentRules pcr in part.PhysicalComponents)
+                    {
+                        if(pcr.GetType() == typeof(BeamEmitterRules))
+                        {
+                            BeamEmitterRules bemtmp = (BeamEmitterRules)pcr;
+
+                            if(bemtmp.SerialID.Equals("BeamEmitter") && !bemList.Contains(bemtmp))
+                            {
+                                bemList.Add(bemtmp);
+
+                                if(bemList.Count == 1)
+                                {
+                                    WeaponsHolder holder = new WeaponsHolder();
+                                    holder.bRules = bemtmp;
+                                    holder.bID = pcr.ID;
+
+                                    SELECTABLE_WEAPONS.Add(holder);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             foreach (KeyValuePair<Cosmoteer.Data.ID<BulletRules>, BulletRules> tmp in GameApp.Rules._bulletRulesById)
             {
                 WeaponsHolder holder = new WeaponsHolder();
@@ -647,15 +875,34 @@ namespace ProjectileSpawner
 
             weaponCategories.Clear();
 
-            BulletRules rules = selectedWeapon.rules;
-            foreach (var r in rules.Components)
+            List<Widget> childList = new List<Widget>();
+            foreach (Widget child in parent.Children)
             {
-                WeaponCategoryHolder cat = new WeaponCategoryHolder();
-                cat.rules = r;
-                weaponCategories.Add(cat);
+                childList.Add(child);
+                //child.Unparent();
+            }
+            foreach (Widget child in childList)
+            {
+                child.Unparent();
             }
 
-            CreateWeaponUI(parent);
+            if (selectedWeapon.rules != null)
+            {
+                BulletRules rules = selectedWeapon.rules;
+                foreach (var r in rules.Components)
+                {
+                    WeaponCategoryHolder cat = new WeaponCategoryHolder();
+                    cat.rules = r;
+                    weaponCategories.Add(cat);
+                }
+
+                CreateWeaponUI(parent);
+            }
+            else
+            {
+                BeamEmitterRules rules = selectedWeapon.bRules;
+                CreateWeaponUI(parent, false, rules);
+            }
         }
 
         private static bool CheckRecursive(Type t)
@@ -741,6 +988,11 @@ namespace ProjectileSpawner
                             BuffableFloat realValue = (BuffableFloat)propValue;
                             TextEditField editField =
                                 Utils.CreateEditLabel(parent, fi.Name, realValue.BaseValue.ToString(), CharFilters.SignedDecimal);
+
+                            if (fi.Name.Equals("Range") && rangeTextField == null)
+                            {
+                                rangeTextField = editField;
+                            }
 
                             WeaponDataHolder wdh = new WeaponDataHolder();
                             wdh.parent = parent;
@@ -858,19 +1110,31 @@ namespace ProjectileSpawner
             return result;
         }
 
-        private static void CreateWeaponUI(LayoutBox<Widget, Widget> parent)
+        private static void CreateWeaponUI(LayoutBox<Widget, Widget> parent, bool categories = true, BeamEmitterRules? bem = null)
         {
-            foreach(WeaponCategoryHolder holder in weaponCategories)
+            rangeTextField = null;
+
+            if(categories)
             {
-                LayoutBox[] widgets = Utils.CreateCategoryBox(parent, holder.rules.GetType().ToString(), false);
+                Type t = selectedWeapon.rules.GetType();
+                RecursiveReadFields(t, selectedWeapon.rules, parent);
 
-                LayoutBox newCatBox = widgets[0];
-                holder.parent = parent;
-                holder.trueParent = widgets[1];
-                holder.box = newCatBox;
+                foreach (WeaponCategoryHolder holder in weaponCategories)
+                {
+                    LayoutBox[] widgets = Utils.CreateCategoryBox(parent, holder.rules.GetType().ToString(), false);
 
-                Type t = holder.rules.GetType();
-                RecursiveReadFields(t, holder.rules, newCatBox);
+                    LayoutBox newCatBox = widgets[0];
+                    holder.parent = parent;
+                    holder.trueParent = widgets[1];
+                    holder.box = newCatBox;
+
+                    t = holder.rules.GetType();
+                    RecursiveReadFields(t, holder.rules, newCatBox);
+                }
+            } else
+            {
+                Type t = bem.GetType();
+                RecursiveReadFields(t, bem, parent);
             }
         }
 
@@ -885,7 +1149,13 @@ namespace ProjectileSpawner
             LayoutBox weaponsBox = Utils.CreateCategoryBox(weaponsToolBox, "Weapons", true)[0];
 
             DropList weaponsList = new DropList();
-            weaponsList.Text = SELECTABLE_WEAPONS[0].rules.ID.ToString();
+            if (SELECTABLE_WEAPONS[0].rules != null)
+            {
+                weaponsList.Text = SELECTABLE_WEAPONS[0].rules.ID.ToString();
+            } else
+            {
+                weaponsList.Text = SELECTABLE_WEAPONS[0].bID.ToString();
+            }
             weaponsList.StateNormalTextRenderer.FontSize = 14;
             weaponsList.StateDisabledTextRenderer.FontSize = 14;
             weaponsList.StateHighlightedTextRenderer.FontSize = 14;
@@ -919,9 +1189,20 @@ namespace ProjectileSpawner
             Label shapeInfoLabel = new Label();
             shapeInfoLabel.AutoSize.AutoWidthMode = AutoSizeMode.Enable;
             shapeInfoLabel.AutoSize.AutoHeightMode = AutoSizeMode.Enable;
-            shapeInfoLabel.Text = "Spawn formation (if amount > 1)";
+            shapeInfoLabel.Text = "--- Spawn formation (if amount > 1) ---";
             shapeInfoLabel.TextRenderer.FontSize = 14;
             weaponsBox.AddChild(shapeInfoLabel);
+
+            TextEditField radiusEdit = Utils.CreateEditLabel(weaponsBox, "Circle Radius", circleRadius.ToString(), CharFilters.UnsignedInteger);
+            radiusEdit.TextChanged += delegate
+            {
+                bool ok = Int32.TryParse(radiusEdit.Text, out int newValue);
+                if (ok && newValue > 0)
+                {
+                    circleRadius = newValue;
+                }
+            };
+            radiusEdit.SelfInputActive = false;
 
             DropList shapeList = new DropList();
             shapeList.Text = SELECTABLE_SPAWN_SHAPES[0].ToString();
@@ -946,6 +1227,14 @@ namespace ProjectileSpawner
                 selectedSpawnShape = shapeBinding.GetDataForWidget(shapeList.SelectedWidget);
                 projectilesEnabled = false;
                 enableProjectileButton.IsSelected = false;
+
+                if(selectedSpawnShape == SpawnShape.Circle)
+                {
+                    radiusEdit.SelfInputActive = true;
+                } else
+                {
+                    radiusEdit.SelfInputActive = false;
+                }
             };
 
             LayoutBox advancedOptionsBox = Utils.CreateCategoryBox(weaponsBox, "Advanced Options", false)[0];
@@ -953,7 +1242,14 @@ namespace ProjectileSpawner
             DataBinder<SelectableButton, WeaponsHolder> weaponBinding = weaponsList.ListBox.Children.BindToData(SELECTABLE_WEAPONS, delegate (WeaponsHolder holder)
             {
                 ListItem listItem = new ListItem();
-                listItem.Text = holder.rules.ID.ToString();
+                if(holder.rules != null)
+                {
+                    listItem.Text = holder.rules.ID.ToString();
+                }
+                else
+                {
+                    listItem.Text = holder.bRules.ID.ToString();
+                }
                 return listItem;
             });
             weaponsList.Clicked += delegate
@@ -1149,8 +1445,10 @@ namespace ProjectileSpawner
 
     public class WeaponsHolder
     {
-        public BulletRules rules;
-        public ID<BulletRules> ID;
+        public BeamEmitterRules? bRules;
+        public ID<PartComponentRules>? bID;
+        public BulletRules? rules;
+        public ID<BulletRules>? ID;
     }
 
     public class WeaponCategoryHolder
