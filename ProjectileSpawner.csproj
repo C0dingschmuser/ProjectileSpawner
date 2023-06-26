@@ -13,7 +13,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Remove="C:\Users\lasch\.nuget\packages\krafs.publicizer\2.2.1\contentfiles\cs\any\Publicizer\IgnoresAccessChecksToAttribute.cs" />
+    <Compile Remove="C:\Users\Nicolas B\.nuget\packages\krafs.publicizer\2.2.1\contentfiles\cs\any\Publicizer\IgnoresAccessChecksToAttribute.cs" />
   </ItemGroup>
 
   <ItemGroup>
@@ -24,8 +24,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Publicize Include="Cosmoteer" IncludeCompilerGeneratedMembers="false"/>
-    <Publicize Include="HalflingCore" IncludeCompilerGeneratedMembers="false"/>
+    <Publicize Include="Cosmoteer" IncludeCompilerGeneratedMembers="false" />
+    <Publicize Include="HalflingCore" IncludeCompilerGeneratedMembers="false" />
   </ItemGroup>
   
   <ItemGroup>
